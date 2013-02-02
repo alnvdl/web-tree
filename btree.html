@@ -1,0 +1,815 @@
+<!--
+Allan Vidal, 344818
+Guilherme de Oliveira Costa Marques, 344770
+Marcus Vinícius Ramires do Nascimento, 345342
+-->
+<html>
+    <head> 
+        <meta charset="utf-8" />
+        <style type="text/css">
+        ul
+        {
+            width: 960px;
+            margin-left: auto; 
+            margin-right: auto;
+            padding: 0px;
+        }
+        
+        ul li
+        {
+            display: inline-block;
+        } 
+    
+        ul li a
+        {
+            display: block;
+            background: #555753;
+            width: 90px;  
+            height: 20px;       
+            font: 1.0em sans-serif;
+            font-weight: bold;
+            text-decoration: none;
+            text-align: center;
+            color: white;
+            padding-top: 2px;
+            padding-bottom: 2px;
+        }
+
+        ul li a:hover
+        {    
+            font-weight: bold;
+            color: #73D216; 
+        }
+        
+        li .menu
+        {
+            margin-left: -1px;
+            display: none;
+            color: white;
+            background: black;
+        }
+    
+        li:hover .menu
+        {
+            position: absolute;
+            color: white;
+            display: block;
+            background: #555753;
+            font: 12px sans-serif;
+            padding: 6px;
+            border: 1px solid white;
+        } 
+        
+        td input[type=text]
+        {
+            width: 100%;
+        }
+        
+        td input[type=button]
+        {
+            float: right;
+        }
+        
+        td.msg
+        {
+            color: yellow;
+        }
+        
+        .bold
+        {
+            font-weight: bold;
+        }
+        
+        #canvas_area
+        {
+            width: 960px; 
+            margin-top: -10px;
+            margin-left: auto; 
+            margin-right: auto;
+        }
+        </style>
+    
+        <script type="text/javascript"> 
+        // Constants
+        WIDTH = 32; // Key width
+        HEIGHT = 32; // Key height
+        SPACING = 32; // Node spacing
+        OFFSET = 16; // Scroll offset
+        // Constants for the BTreeDrawing.draw method
+        CENTER_ROOT = 0;
+        CENTER_NODE = 1;
+        SCROLL = 2;
+ 
+        /*
+        Node: represents a node in a b-tree
+            ord: the order of the tree the node belongs to.
+        */
+        function Node(ord)
+        {
+            this.order = ord;
+            this.par = null; // the node's parent node (null for the root node).
+            this.keys = []; // the node's key array.
+            this.children = []; // node's sorted children nodes array
+            this.x = 0; // node's x coordinate in the canvas
+            this.y = 0; // node's y coordinate in the canvas
+            
+            /*
+            leaf: verifies if the node is a leaf.
+            Returns: True if node is a leaf, otherwise False.
+            */
+            this.leaf = function()
+            {
+                return this.children.length == 0; 
+            }
+
+            /*
+            overflow: verifies if the node has more keys than it's order allows
+            Returns: True if the node has keys in excess.
+            */ 
+            this.overflow = function()
+            {
+                return this.order <= this.keys.length; 
+            }
+            
+            /*
+            split: splits the node into two
+            Returns: the median key of the original node.
+            *note: the new node is put at the end of the older node's 
+                   children array.
+            */ 
+            this.split = function()
+            {
+                var ind = Math.floor(this.order / 2) + 1;
+                var new_node = new Node(this.order);
+                new_node.keys = this.keys.slice(ind);
+                new_node.children = this.children.slice(ind);
+                for(var x in new_node.children)
+                    new_node.children[x].par = new_node;
+                this.keys = this.keys.slice(0,ind);
+                this.children = this.children.slice(0,ind);
+                this.children.push(new_node);
+                return this.keys.pop(); 
+            }
+
+            /*
+            add_key: adds a key to the node's key array (in the correct position 
+                to keep the array ordered).
+                key: the value to be added.
+            Returns: te position in which the key was inserted in the array.
+            */ 
+            this.add_key = function(key)
+            {
+                var i = 0;
+                while(i < this.keys.length && this.keys[i] < key) i++;
+                this.keys.splice(i,0,key);
+                return i; 
+            }
+
+            /*
+            search: recursive function to search the node and it's children
+                for the presence of a value.
+                key: value to be searched.
+            Returns: the node that contains the key, and the index in the node's
+                     key array or [null, 0] if key is not found.
+            */            
+            this.search = function(key)
+            {
+                var i = 0;
+                while(i < this.keys.length)
+                {
+                    if(this.keys[i] == key)
+                        return [this, i];
+                    else if(this.keys[i] > key)
+                    {
+                        if (this.leaf())
+                            return [null, 0];
+                        else
+                            return this.children[i].search(key);
+                    }
+                    else
+                        i++;
+                }
+                if(this.leaf())
+                    return [null, 0];
+                else 
+                    return this.children[i].search(key);
+            }
+        }
+
+        /*
+        BTree: a b-tree.
+            order: the order of the tree.
+            root: the root node of the tree.
+            n_keys: number of keys in the tree.
+        */
+        function BTree(ord)
+        {
+            this.order = ord;
+            this.root = new Node(this.order);
+            this.n_keys = 0;
+            this.x_offset = 0;
+            this.y_offset = 0;
+            
+            /*
+            insert_key: insert a new key in the tree
+                key: the new key to be inserted
+            Returns: The node in which the key was inserted.
+            */
+            this.insert_key = function(key)
+            {
+                var ins_node = this.find_leaf(this.root, key);
+                ins_node.add_key(key);
+                while(ins_node.overflow())
+                {
+                    var up_val = ins_node.split();
+                    var n_node = ins_node.children.pop();
+                    if(ins_node.par != null)
+                    {
+                        ins_node = ins_node.par;
+                        var ind = ins_node.add_key(up_val);
+                        ins_node.children.splice(ind + 1, 0, n_node);
+                        n_node.par = ins_node; 
+                    }
+                    else
+                    {
+                        this.root = new Node(this.order);
+                        this.root.add_key(up_val);
+                        this.root.children.push(ins_node);
+                        this.root.children.push(n_node);
+                        n_node.par = this.root;
+                        ins_node.par = this.root;
+                        ins_node = ins_node.par; 
+                    }
+                }
+                this.n_keys++;
+            }
+            
+            /*
+            find_leaf: find the correct leaf node to insert a key.
+                node: root of the subtree to search.
+                key: value used to find a leaf node.
+            Returns: The leaf node in which the key should be inserted.
+            */
+            this.find_leaf = function(node, key)
+            {
+                if (node.leaf()) return node;
+                else
+                {
+                    var i = 0;
+                    while(i < node.keys.length && node.keys[i] < key) i++;
+                    return this.find_leaf(node.children[i], key);
+                }
+            }
+        
+            /*
+            search_key: search for the existence and position of a key in the 
+                        tree
+                key: the value to be searched.
+            Returns: the node that contains the key, and the index in the node's
+                     key array or [null, 0] if key is not found.
+            */
+            this.search_key = function(key)
+            {
+                return this.root.search(key)
+            }
+        }
+        
+        /*
+        BTreeDrawing: a drawing of a BTree object
+            tree: the BTree to be represented
+            canvas: the canvas on which the tree will be represented
+        */
+        function BTreeDrawing(tree, canvas)
+        {
+            this.tree = tree;
+            this.canvas = canvas;
+            this.context = canvas.getContext("2d");
+            this.highlight = null;
+
+                
+            /*
+            draw: (re)paints the tree
+                mode: describes the reason for the (re)drawing
+                    CENTER_ROOT: centering the root at the top
+                    CENTER_NODE: fully centering a node, and optionally 
+                                 highlighting it
+                    SCROLL: scrolling the tree, just move it
+                For each mode, arg1 and arg2 assume different values:
+                    CENTER_ROOT: arg1 and arg2 are not used;
+                    CENTER_NODE: arg1 is center node and arg2 is highlight key
+                    SCROLL: arg1 is the x delta and arg2 is the y delta
+            Returns: -
+            */
+            this.draw = function(mode, arg1, arg2)
+            {
+                if (mode == undefined)
+                    mode = CENTER_ROOT;
+                    
+                // Localize variables for easier access
+                var canvas = this.canvas;
+                var context = this.context;
+            
+                canvas.width = canvas.width;
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                context.textAlign = "center";
+                context.textBaseline = "middle";
+                context.font = "12px sans-serif";
+                
+                // Center in the root if center_node is undefined
+                // The root is centered differently: on the center at the top
+                var deltas;
+                if (mode != SCROLL)
+                {
+                    function get_delta_to_point(node, x, y)
+                    {
+                        var middle = (node.keys.length*WIDTH)/2;
+                        return [x - node.x - middle, y - node.y - HEIGHT/2];
+                    }
+                    
+                    this.position_tree(this.tree.root);
+                    if (mode == CENTER_ROOT)
+                        deltas = get_delta_to_point(this.tree.root,
+                                                    canvas.width / 2,
+                                                    OFFSET * 2 + 8);
+                    else if (mode == CENTER_NODE)
+                        deltas = get_delta_to_point(arg1, 
+                                                    canvas.width / 2, 
+                                                    canvas.height / 2); 
+                    this.move_tree(deltas[0], deltas[1]);
+                    this.highlight = null;
+                }
+                else
+                {
+                    this.move_tree(arg1 * 5, arg2 * 5);
+                    // If we are scrolling, keep the highlighting
+                    if (this.highlight != null)
+                    {
+                        mode = CENTER_NODE;
+                        arg1 = this.highlight[0];
+                        arg2 = this.highlight[1];
+                    }
+                }
+                this.draw_node(this.tree.root, context);
+                
+                if (mode == CENTER_NODE)
+                {
+                    context.lineWidth = 2;
+                    context.strokeStyle = "#F57900"; // Orange
+                    context.strokeRect(arg1.x + arg2*WIDTH,
+                                       arg1.y, WIDTH, HEIGHT);
+                    this.highlight = [arg1, arg2];
+                }
+ 
+                // (Re)draw the canvas frame
+                context.fillStyle = "#555753"; // Aluminium
+                context.beginPath();
+                // Top arrow
+                context.clearRect(0, 0, canvas.width, OFFSET + 4);
+                context.moveTo(canvas.width / 2, 0);
+                context.lineTo((canvas.width / 2) - (OFFSET / 2), OFFSET);
+                context.lineTo((canvas.width / 2) + (OFFSET / 2), OFFSET);
+                
+                // Left arrow
+                context.clearRect(0, 0, OFFSET + 4, canvas.height);
+                context.moveTo(0, canvas.height / 2);
+                context.lineTo(OFFSET, canvas.height / 2 + (OFFSET / 2));
+                context.lineTo(OFFSET, canvas.height / 2 - (OFFSET / 2));
+ 
+                // Bottom arrow
+                context.clearRect(0, canvas.height - OFFSET - 4, 
+                                  canvas.width, canvas.height);
+                context.moveTo(canvas.width / 2, canvas.height);
+                context.lineTo((canvas.width / 2) - (OFFSET / 2), 
+                               canvas.height - OFFSET);
+                context.lineTo((canvas.width / 2) + (OFFSET / 2), 
+                               canvas.height - OFFSET);
+                
+                // Right arrow
+                context.clearRect(canvas.width - OFFSET - 4, 0, 
+                                  canvas.width, canvas.height);
+                context.moveTo(canvas.width, canvas.height / 2);
+                context.lineTo(canvas.width - OFFSET, 
+                               canvas.height / 2 + (OFFSET / 2));
+                context.lineTo(canvas.width - OFFSET, 
+                               canvas.height / 2 - (OFFSET / 2));
+ 
+                context.closePath();
+                context.fill();
+            }
+            
+            /*
+            draw_node: draw a tree rooted in the given node to a canvas context.
+                node: the node that will be drawn
+            Returns: -
+            */
+            this.draw_node = function(node)
+            {
+                // Localize variables for easier access
+                var context = this.context;
+                
+                // Draw the node
+                context.lineWidth = 2;
+                context.strokeStyle = "#729FCF"; // Sky Blue
+                context.fillStyle = "#000000";
+ 
+                var key;
+                var step = WIDTH;
+                for (var i = 0; i < node.keys.length; i++)
+                {
+                    key = node.keys[i];
+                    context.strokeRect(node.x + i*step, node.y, WIDTH, HEIGHT);
+                    context.fillText(key, (node.x + i*step) + (WIDTH / 2), 
+                                     node.y + (HEIGHT / 2));
+                }
+ 
+                // Draw and connect is children
+                var child;
+                context.strokeStyle = "#73D216"; // Chameleon
+                for (var i = 0; i < node.children.length; i++)
+                {
+                    context.beginPath();
+                    child = node.children[i];
+                    this.draw_node(child, context);
+                    context.moveTo(node.x + i*step, node.y + HEIGHT);
+                    context.lineTo(child.x + ((child.keys.length*WIDTH)/2), 
+                                   child.y - 1);
+                    context.lineWidth = 1;
+                    context.stroke();
+                    context.closePath();
+                }
+            }
+ 
+            /*
+            get_tree_width: calculate the width of a tree based on its leftmost 
+            and rightmost children.
+                node: the tree root whose width will be calculated
+            Returns: the width of the tree.
+            */
+            this.get_tree_width = function(node)
+            {
+                if (node.children.length > 0)
+                {
+                    var lm = node.children[0];
+                    while (lm.children.length > 0)
+                            lm = lm.children[0];
+                    var rm = node.children[node.children.length - 1];
+                    while (rm.children.length > 0)
+                            rm = rm.children[rm.children.length - 1];
+                    return (rm.x - lm.x) + WIDTH*rm.keys.length;
+                }
+                return WIDTH*node.keys.length;
+            }
+            
+            /*
+            position_tree: lay out a tree for drawing.
+                node: the tree root to lay out
+                pnode: the parent node (defaults to undefined)
+                cur_x: the current x coordinate (defaults to 0)
+            Returns: -
+            */
+            this.position_tree = function(node, pnode, cur_x)
+            {
+                if (node.children.length != 0)
+                {
+                    cur_x = (cur_x == undefined)? 0 : cur_x;
+                    // Adjust the y coordinate to place the node below its 
+                    // parent
+                    if (pnode != undefined)
+                        node.y = (pnode.y + HEIGHT) + SPACING;
+                    // For every child...
+                    var child;
+                    for (var i = 0; i < node.children.length; i++)
+                    {
+                        child = node.children[i];
+        
+                        // If it is not a leaf, place the sutree accordingly                
+                        if (!child.leaf())
+                            this.position_tree(child, node, cur_x);
+                        // If it's a leaf, lay it out based on its siblings
+                        else
+                        {
+                            child.x = cur_x;
+                            child.y = node.y + HEIGHT + SPACING;
+                        }
+                        // Increase the x coordinate based on the sutree width
+                        cur_x += this.get_tree_width(child) + SPACING;
+                    }
+                    // Adjust the x coordinate to be centered above the children
+                    if (!node.leaf())
+                    {
+                        var first = node.children[0];
+                        var last = node.children[node.children.length - 1];
+                        var width = node.keys.length*WIDTH;
+                        node.x = ((first.x + last.x + 
+                                  (last.keys.length)*WIDTH) / 2) - width/2;
+                    }
+                }
+            }
+ 
+            /*
+            move_tree: move the nodes of a tree based on given deltas
+                node: the node to move (if undefined, becomes the root)
+                delta_x: delta x (horizontal)
+                delta_y: delta y (vertical)
+            Returns: -
+            */
+            this.move_tree = function(delta_x, delta_y, node)
+            {
+                if (node == undefined)
+                {
+                    node = this.tree.root;
+                    this.offset_x += delta_x;
+                    this.offset_y += delta_y;
+                }
+ 
+                node.x += delta_x;
+                node.y += delta_y;
+                for (var i = 0; i < node.children.length; i++)
+                    this.move_tree(delta_x, delta_y, node.children[i]);
+            }
+        }
+        
+        /* Event handlers */
+        function on_button_insert_clicked()
+        {
+            var n = parseInt(document.getElementById("insert_key").value);
+            if (isNaN(n))
+                show_error_message("insert", "O valor deve ser um inteiro");
+            else
+            {
+                if (document.getElementById("n").checked)
+                {
+                    tree.insert_key(n);
+                    drawing.draw();
+                }
+                else
+                {
+                    for (var i = 0; i < n; i++)
+                        tree.insert_key(Math.floor(Math.random()*n*10))
+                    drawing.draw();
+                }
+                clear_error_message("insert");
+                update_tree_data();
+            }
+            focus("insert_key");
+        }
+ 
+        function on_button_search_clicked()
+        {
+            var n = parseInt(document.getElementById("search_key").value);
+            if (isNaN(n))
+                show_error_message("search", "A chave deve ser um inteiro");
+            else
+            {
+                var result, node, position;
+                result = tree.search_key(n);
+                node = result[0]; hl_position = result[1];
+                if (node != null)
+                {
+                    clear_error_message("search");
+                    drawing.draw(CENTER_NODE, node, hl_position);
+                }
+                else
+                    show_error_message("search", 
+                                       "A chave " + n + " não está na árvore");
+            }
+            focus("search_key");
+        }
+        
+        function on_button_clear_clicked()
+        {
+            new_tree(tree.order);
+        }
+ 
+        function on_button_create_clicked()
+        {
+            var order = parseInt(document.getElementById("entry_order").value)
+            if (isNaN(order) || order < 3)
+            {
+                show_error_message("create", "A ordem deve ser um inteiro " +
+                                   "maior ou igual a 3");
+                return;
+            }
+            clear_error_message("create");
+            new_tree(order);
+            focus("entry_order");
+        }
+        
+        function on_canvas_clicked(e)
+        {
+            var x = 0;
+            var y = 0;
+            var canvas = document.getElementById("canvas");
+            if (!e) var e = window.event;
+            if (e.pageX || e.pageY)
+            {
+                x = e.pageX;
+                y = e.pageY;
+            }
+            else if (e.clientX || e.clientY)
+            {
+                x = e.clientX + document.body.scrollLeft +
+                    document.documentElement.scrollLeft;
+                y = e.clientY + document.body.scrollTop +
+                    document.documentElement.scrollTop;
+            }
+            // Get the coordinates relatively to the canvas
+            x = x - canvas.offsetLeft;
+            y = y - canvas.offsetTop;
+ 
+            var delta_x = 0;
+            var delta_y = 0;
+            var width = canvas.width;
+            var height = canvas.height;
+            middle_y = canvas.height / 2;
+            middle_x = canvas.width / 2;
+            // Scroll left
+            if (x < OFFSET*2 && 
+                middle_y - OFFSET <= y && y <= middle_y + OFFSET)
+                delta_x = OFFSET;
+            // Scroll right
+            else if (x > width - OFFSET*2 && 
+                     middle_y - OFFSET <= y && y <= middle_y + OFFSET)
+                delta_x = -OFFSET;
+            // Scroll down
+            else if (y < OFFSET*2 && 
+                     middle_x - OFFSET <= x && x <= middle_x + OFFSET)
+                delta_y = OFFSET;
+            // Scroll up
+            else if (y > height - OFFSET*2 &&
+                     middle_x - OFFSET <= x && x <= middle_x + OFFSET)
+                delta_y = -OFFSET;
+            drawing.draw(SCROLL, delta_x, delta_y);
+        }
+        
+        /* Tree utilities */
+        function new_tree(order)
+        {
+            tree = new BTree(order);
+            var canvas = document.getElementById("canvas");
+            drawing = new BTreeDrawing(tree, canvas);
+            drawing.draw();
+            update_tree_data();
+        }
+        
+        function update_tree_data()
+        {
+            document.getElementById("order").innerHTML = tree.order;
+            document.getElementById("n_keys").innerHTML = tree.n_keys;
+        }
+        
+        /* UI utilities */
+        function show_error_message(element, msg)
+        {
+            document.getElementById(element + "_msg").innerHTML = msg;
+        }
+        
+        function clear_error_message(element)
+        {
+            document.getElementById(element + "_msg").innerHTML = "";
+        }
+        
+        function focus(element)
+        {
+            document.getElementById(element).focus();
+            document.getElementById(element).select();
+        }
+
+        function show_help(start)
+        {
+            if (start)
+                new_tree(4);
+            var canvas = document.getElementById("canvas");
+            var context = canvas.getContext("2d");
+
+            context.textAlign = "left";
+
+            context.fillStyle = "#2e3436";
+            context.fillRect(0, 0, 960, 450);
+            
+            context.fillStyle = "#73D216";
+            context.font = "bold 1.8em sans";
+            context.fillText("INSTRUÇÕES", 380, 40);
+
+            context.fillStyle = "white";
+
+            context.font = "0.9em sans-serif";
+            context.fillText("O aplicativo constrói uma representação lógica e gráfica de uma árvore-B.", 30, 80);
+            context.fillText("Apenas inteiros são aceitos como chave. Se um valor incorreto for digitado, uma mensagem notificará o usuário.", 30, 110);
+            context.fillText("Há 3 menus principais para realizar as operações na árvore:", 30, 140);
+
+            context.font = "bold 0.9em sans-serif";
+            context.fillText("Árvore:", 50, 170);
+            context.font = "0.9em sans-serif";
+            context.fillText("Mostra a ordem, número de nós atuais da árvore e permite limpá-la ou criar uma nova;", 130, 170);
+            context.fillText("- Limpar a árvore implica na criação de uma nova árvore com a mesma ordem da árvore atual;", 130, 190);
+            context.fillText("- É possível criar árvores novas com order maior ou igual a 3.", 130, 210);
+            
+            context.font = "bold 0.9em sans-serif";
+            context.fillText("Inserção:", 50, 250);
+            context.font = "0.9em sans-serif";
+            context.fillText("Permite a inserção de chaves na árvore;", 130, 250);
+            context.fillText("- O número digitado pode ser inserido como chave ou indicar o número de chaves aleatórias a inserir;", 130, 270); 
+            context.fillText("- Após a inserção, a visão será centralizada na raiz.", 130, 290);
+
+            context.font = "bold 1.0em sans-serif";
+            context.fillText("Busca:", 50, 320);
+            context.font = "0.9em sans-serif";
+            context.fillText("Realiza a busca de chaves na árvore;", 130, 320);
+            context.fillText("- Se a chave for encontrada, será destacada e seu nó centralizado.", 130, 340);
+
+            context.font = "bold 1.0em sans-serif";
+            context.fillText("Uma árvore de ordem 4 é criada ao abrir o aplicativo.", 30, 380);
+            context.fillText("Estas instruções podem ser acessadas a partir do botão 'Ajuda' a qualquer momento.", 30, 400);
+            context.fillText("Clique nesta mensagem para fechá-la.", 30, 420);
+        }
+
+        </script> 
+    </head>
+    <body onload="show_help(true)">
+        <ul>
+            <li><a href="#">Árvore</a>
+                    <table class="menu">
+                        <tr>
+                            <td colspan="2" class="bold">Árvore atual</td>
+                        </tr>
+                        <tr>
+                            <td>Ordem:</td>
+                            <td id="order">0</td>
+                        </tr>
+                        <tr>
+                            <td>Chaves:</td>
+                            <td id="n_keys">0</td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"><input id="button_clear" value="Limpar árvore" type="button" 
+                                                   onclick="on_button_clear_clicked()" /></td>
+                        </tr>
+                        <tr>
+                            <td colspan="2" style="font-weight: bold;"><br />Nova árvore</td>
+                        </tr>
+                        <tr>
+                            <td><label for="entry_order">Ordem:</label></td>
+                            <td><input id="entry_order" type="text" name="entry_order" 
+                                       autofocus="autofocus" 
+                                       onkeypress="if (event.keyCode == 13) document.getElementById('button_create').click();" /></td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"><input id="button_create" value="Criar árvore" type="button" 
+                                                   onclick="on_button_create_clicked()" /></td>
+                        </tr>
+                        <tr>
+                            <td class="msg" id="create_msg" colspan="2"></td>
+                        <tr>
+                    </table>
+            </li>
+            
+            <li><a href="#">Inserção</a>
+                    <table class="menu">
+                        <tr>
+                            <td><label for="insert_key">Número:</label></td>
+                            <td><input id="insert_key" type="text" name="insert_key" autofocus="autofocus" 
+                                       onkeypress="if (event.keyCode == 13) document.getElementById('button_insert').click();"/>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"><input type="radio" name="n" id="n" checked />Inserir como chave</td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"><input type="radio" name="n" id="nram" />Inserir este número de chaves aleatórias</td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"><input id="button_insert" value="Inserir" type="button" onclick="on_button_insert_clicked()" />
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="msg" id="insert_msg" colspan="2"></td>
+                        <tr>                        
+                    </table>
+            </li>
+            
+            <li><a href="#">Busca</a>
+                    <table class="menu">
+                        <tr>
+                            <td><label for="search_key">Chave:</label></td>
+                            <td><input id="search_key" type="text" name="search_key" 
+                                       autofocus="autofocus" onkeypress="if (event.keyCode == 13) document.getElementById('button_search').click();" /></td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"><input id="button_search" value="Buscar" type="button" onclick="on_button_search_clicked()" />
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="msg" id="search_msg" colspan="2"></td>
+                        <tr>
+                    </table>
+            </li>
+            
+            <li><a href="#" onclick="show_help(false)">Ajuda</a></li>
+        </ul>
+        
+        <div id="canvas_area">
+            <canvas id="canvas" width="960" height="450" onmouseup="on_canvas_clicked(event)"></canvas>
+        </div>
+    </body>
+</html>
